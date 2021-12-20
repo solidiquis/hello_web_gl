@@ -1,11 +1,11 @@
 mod shaders;
 use std::collections::HashMap;
 use std::f32::consts::PI;
-use js_sys::Float32Array;
+use js_sys::{Float32Array, Uint16Array};
 use nalgebra_glm as glm;
 use wasm_bindgen::{JsValue, JsCast};
 use wasm_bindgen::prelude::wasm_bindgen;
-use web_sys::{Document, HtmlCanvasElement, console};
+use web_sys::{HtmlCanvasElement, console};
 use web_sys::WebGlBuffer as Buffer;
 use web_sys::WebGlProgram as Program;
 use web_sys::WebGlShader as Shader;
@@ -41,19 +41,20 @@ pub fn hello_webgl() -> Result<(), JsValue> {
     };
 
     let vert_index = *shader_program.attrloc.get("vertices").unwrap();
+    let col_index = *shader_program.attrloc.get("colors").unwrap();
     let m_index = shader_program.unifloc.get("model_matrix").unwrap();
     let v_index = shader_program.unifloc.get("view_matrix").unwrap();
     let p_index = shader_program.unifloc.get("projection_matrix").unwrap();
 
-    let vbo = ShaderProgram::init_vbo(&gl_context);
-    gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&vbo));
+    let (position_buffer, color_buffer, index_buffer) = ShaderProgram::init_vbo(&gl_context);
 
-    let num_components = 2;
-    let kind = GL::FLOAT;
+    let mut num_components = 3;
+    let mut kind = GL::FLOAT;
     let normalize = false;
     let stride = 0;
     let offset = 0;
 
+    gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&position_buffer));
     gl_context.vertex_attrib_pointer_with_i32(
         vert_index,
         num_components,
@@ -63,6 +64,22 @@ pub fn hello_webgl() -> Result<(), JsValue> {
         offset
     );
     gl_context.enable_vertex_attrib_array(vert_index);
+
+    gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&color_buffer));
+    num_components = 4;
+
+    gl_context.vertex_attrib_pointer_with_i32(
+        col_index,
+        num_components,
+        kind,
+        normalize,
+        stride,
+        offset
+    );
+    gl_context.enable_vertex_attrib_array(col_index);
+
+    gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&index_buffer));
+
     gl_context.use_program(Some(&shader_program.program));
 
     let inner_height = window.inner_height()?.as_f64().unwrap();
@@ -89,9 +106,9 @@ pub fn hello_webgl() -> Result<(), JsValue> {
         projection_matrix
     );
 
-    let vertex_count = 4;
-    let offset = 0;
-    gl_context.draw_arrays(GL::TRIANGLE_STRIP, offset, vertex_count);
+    let vertex_count = 36;
+    kind = GL::UNSIGNED_SHORT;
+    gl_context.draw_elements_with_i32(GL::TRIANGLES, vertex_count, kind, offset);
 
     Ok(())
 }
@@ -132,6 +149,10 @@ impl ShaderProgram {
             "vertices".to_string(),
             gl_context.get_attrib_location(&program, "vCoord") as u32
         );
+        attribute_locations.insert(
+            "colors".to_string(),
+            gl_context.get_attrib_location(&program, "vColor") as u32
+        );
 
         let mut uniform_locations: HashMap<String, UniformLocation> = HashMap::new();
         uniform_locations.insert(
@@ -169,33 +190,109 @@ impl ShaderProgram {
         Ok(shader) 
     }
 
-    fn init_vbo(gl_context: &GL) -> Buffer {
-        let vbo = gl_context.create_buffer().unwrap();
-        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&vbo));
+    fn init_vbo(gl_context: &GL) -> (Buffer, Buffer, Buffer) {
+        let position_buffer = gl_context.create_buffer().unwrap();
+        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&position_buffer));
 
-        let coords: [f32; 8] = [
-            -1.0, 1.0,
-             1.0, 1.0,
-            -1.0, -1.0,
-             1.0, -1.0
+        let positions: [f32; 72] = [
+            // Front face
+            -1.0, -1.0,  1.0,
+            1.0, -1.0,  1.0,
+            1.0,  1.0,  1.0,
+            -1.0,  1.0,  1.0,
+
+            // Back face
+            -1.0, -1.0, -1.0,
+            -1.0,  1.0, -1.0,
+            1.0,  1.0, -1.0,
+            1.0, -1.0, -1.0,
+
+            // Top face
+            -1.0,  1.0, -1.0,
+            -1.0,  1.0,  1.0,
+            1.0,  1.0,  1.0,
+            1.0,  1.0, -1.0,
+
+            // Bottom face
+            -1.0, -1.0, -1.0,
+            1.0, -1.0, -1.0,
+            1.0, -1.0,  1.0,
+            -1.0, -1.0,  1.0,
+
+            // Right face
+            1.0, -1.0, -1.0,
+            1.0,  1.0, -1.0,
+            1.0,  1.0,  1.0,
+            1.0, -1.0,  1.0,
+
+            // Left face
+            -1.0, -1.0, -1.0,
+            -1.0, -1.0,  1.0,
+            -1.0,  1.0,  1.0,
+            -1.0,  1.0, -1.0,
         ];
-
-        let sl_coords: &[f32] = &coords;
-
-        let buffer = Float32Array::from(sl_coords).buffer();
+        let sl_positions: &[f32] = &positions;
+        let positions_ar = Float32Array::from(sl_positions).buffer();
 
         gl_context.buffer_data_with_opt_array_buffer(
             GL::ARRAY_BUFFER,
-            Some(&buffer),
+            Some(&positions_ar),
             GL::STATIC_DRAW
         );
 
-        vbo
+        let index_buffer = gl_context.create_buffer().unwrap();
+        gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&index_buffer));
+
+        let indices: [u16; 36] = [
+            0,  1,  2,      0,  2,  3,    // front
+            4,  5,  6,      4,  6,  7,    // back
+            8,  9,  10,     8,  10, 11,   // top
+            12, 13, 14,     12, 14, 15,   // bottom
+            16, 17, 18,     16, 18, 19,   // right
+            20, 21, 22,     20, 22, 23,   // left
+        ];
+        let sl_indices: &[u16] = &indices;
+        let indices_ar = Uint16Array::from(sl_indices).buffer();
+
+        gl_context.buffer_data_with_opt_array_buffer(
+            GL::ELEMENT_ARRAY_BUFFER,
+            Some(&indices_ar),
+            GL::STATIC_DRAW
+        );
+
+        let color_buffer = gl_context.create_buffer().unwrap();
+        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&color_buffer));
+
+        let colors: [f32; 96] = [
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+            1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0,
+        ];
+
+        let sl_colors: &[f32] = &colors;
+        let colors_ar = Float32Array::from(sl_colors).buffer();
+
+        gl_context.buffer_data_with_opt_array_buffer(
+            GL::ARRAY_BUFFER,
+            Some(&colors_ar),
+            GL::STATIC_DRAW
+        );
+
+        (position_buffer, color_buffer, index_buffer)
     }
 
     fn model_matrix() -> Vec<f32> {
-        let matrix = glm::translate(
+        let mut matrix = glm::rotate(
             &glm::TMat4::identity(),
+            //PI / 4.0,
+            0.0,
+            &glm::vec3(0.0, 0.0, -1.0)
+        );
+        matrix = glm::translate(
+            &matrix,
             &glm::vec3(0.0, 0.0, -5.0)
         );
         let model: [[f32; 4]; 4] = *matrix.as_ref();
