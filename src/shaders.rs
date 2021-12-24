@@ -1,6 +1,6 @@
 pub const VS_GLSL: &'static str = r#"
-    attribute vec4 vCoord;
-    attribute vec4 vColor;
+    attribute vec3 position;
+    attribute vec3 color;
 
     varying lowp vec4 fragColor;
 
@@ -9,8 +9,8 @@ pub const VS_GLSL: &'static str = r#"
     uniform mat4 p;
 
     void main() {
-        gl_Position = p * v * m * vCoord;
-        fragColor = vColor;
+        gl_Position = p * v * m * vec4(position, 1.0);
+        fragColor = vec4(color, 1.0);
     }
 "#;
 

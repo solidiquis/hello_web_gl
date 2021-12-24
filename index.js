@@ -8,5 +8,9 @@ window.onload = rust.then(wasm => {
     return
   }
 
-  wasm.hello_webgl()
+  try {
+    wasm.hello_webgl();
+  } catch(e) {
+    console.error(e);
+  }
 });
