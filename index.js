@@ -9,7 +9,8 @@ window.onload = rust.then(wasm => {
   }
 
   try {
-    wasm.hello_webgl();
+    let helloWebGL = new wasm.HelloWebGL("hello-webgl");
+    helloWebGL.render(canvas.width, canvas.height);
   } catch(e) {
     console.error(e);
   }

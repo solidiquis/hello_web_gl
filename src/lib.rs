@@ -1,7 +1,9 @@
+mod geometry;
+mod maths;
 mod shaders;
-use std::collections::HashMap;
 use std::f32::consts::PI;
-use js_sys::{Float32Array, Uint16Array};
+use std::collections::HashMap;
+use js_sys::{JsString, Float32Array, Number, Uint16Array};
 use nalgebra_glm as glm;
 use wasm_bindgen::{JsValue, JsCast};
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -13,229 +15,205 @@ use web_sys::WebGlRenderingContext as GL;
 use web_sys::WebGlUniformLocation as UniformLocation;
 
 #[wasm_bindgen]
-pub fn hello_webgl() {
-    match demo() {
-        Ok(_) => console::log_1(&JsValue::from_str("Demo successfully rendered!")),
-        Err(e) => {
-            console::error_1(&e);
-            wasm_bindgen::throw_val(e);
-        }
-    }
+struct HelloWebGL {
+    gl_context: GL,
+    program: Program,
+    uniform_locations: HashMap<String, UniformLocation>,
+    index_buffer: Buffer,
 }
 
-fn demo() -> Result<(), JsValue> {
-    // *======== Canvas & WebGL Context =========*
-    let window = web_sys::window().unwrap();
-    let document = window.document().unwrap();
-    let element = document.get_element_by_id("hello-webgl").unwrap();
+#[wasm_bindgen]
+impl HelloWebGL {
 
-    let canvas = element.dyn_into::<HtmlCanvasElement>()?;
-    let gl_context = canvas.get_context("webgl")?.unwrap().dyn_into::<GL>()?; 
+    #[wasm_bindgen(constructor)]
+    pub fn new(canvas_id: JsString) -> Self {
+        // *======== Initialize context ========*
+        let gl_context = match Self::init_context(canvas_id) {
+            Ok(c) => c,
+            Err(e) => wasm_bindgen::throw_val(e)
+        };
 
-    // *======== Geometry =========*
-    let vertices: [f32; 72] = [
-        -1.0,-1.0,-1.0,   1.0,-1.0,-1.0,   1.0, 1.0,-1.0,  -1.0, 1.0,-1.0,
-        -1.0,-1.0, 1.0,   1.0,-1.0, 1.0,   1.0, 1.0, 1.0,  -1.0, 1.0, 1.0,
-        -1.0,-1.0,-1.0,  -1.0, 1.0,-1.0,  -1.0, 1.0, 1.0,  -1.0,-1.0, 1.0,
-         1.0,-1.0,-1.0,   1.0, 1.0,-1.0,   1.0, 1.0, 1.0,   1.0,-1.0, 1.0,
-        -1.0,-1.0,-1.0,  -1.0,-1.0, 1.0,   1.0,-1.0, 1.0,   1.0,-1.0,-1.0,
-        -1.0, 1.0,-1.0,  -1.0, 1.0, 1.0,   1.0, 1.0, 1.0,   1.0, 1.0,-1.0
-    ];
+        // *======== Load geometry into context ========*
+        let vertex_buffer = if let Some(buf) = gl_context.create_buffer() {
+            gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&buf));        
 
-    let colors: [f32; 72] = [
-        1.0,0.0,0.0,  1.0,0.0,0.0,  1.0,0.0,0.0,  1.0,0.0,0.0,
-        0.0,1.0,0.0,  0.0,1.0,0.0,  0.0,1.0,0.0,  0.0,1.0,0.0,
-        1.0,0.0,1.0,  0.0,0.0,1.0,  0.0,0.0,1.0,  0.0,0.0,1.0,
-        1.0,1.0,0.0,  1.0,1.0,0.0,  1.0,1.0,0.0,  1.0,1.0,0.0,
-        1.0,0.0,1.0,  1.0,0.0,1.0,  1.0,0.0,1.0,  1.0,0.0,1.0,
-        0.0,1.0,1.0,  0.0,1.0,1.0,  0.0,1.0,1.0,  0.0,1.0,1.0,
-    ];
+            let slice: &[f32] = &geometry::VERTICES;
+            let array = Float32Array::from(slice).buffer();
+            gl_context.buffer_data_with_opt_array_buffer(
+                GL::ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
+            );
 
-    let indices: [u16; 36] = [
-        0, 1, 2,   0, 2, 3,   4, 5, 6,   4,6,7,
-        8, 9, 10,  8, 10,11,  12,13,14,  12,14,15,
-        16,17,18,  16,18,19,  20,21,22,  20,22,23
-    ];
+            buf
+        } else {
+            let err = JsValue::from_str("Error binding data to vertex buffer.");
+            wasm_bindgen::throw_val(err);
+        };
 
-    // *======== Load geometry into context =========*
-    let vertex_buffer = if let Some(buf) = gl_context.create_buffer() {
-        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&buf));        
+        let color_buffer = if let Some(buf) = gl_context.create_buffer() {
+            gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&buf));
 
-        let slice: &[f32] = &vertices;
-        let array = Float32Array::from(slice).buffer();
-        gl_context.buffer_data_with_opt_array_buffer(
-            GL::ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
-        );
+            let slice: &[f32] = &geometry::COLORS;
+            let array = Float32Array::from(slice).buffer();
+            gl_context.buffer_data_with_opt_array_buffer(
+                GL::ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
+            );
 
-        buf
-    } else {
-        let err = JsValue::from_str("Error binding data to vertex buffer.");
-        return Err(err);
-    };
+            buf
+        } else {
+            let err = JsValue::from_str("Error binding data to color buffer.");
+            wasm_bindgen::throw_val(err);
+        };
 
-    let color_buffer = if let Some(buf) = gl_context.create_buffer() {
-        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&buf));
+        let index_buffer = if let Some(buf) = gl_context.create_buffer() {
+            gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&buf));
 
-        let slice: &[f32] = &colors;
-        let array = Float32Array::from(slice).buffer();
-        gl_context.buffer_data_with_opt_array_buffer(
-            GL::ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
-        );
+            let slice: &[u16] = &geometry::INDICES;
+            let array = Uint16Array::from(slice).buffer();
+            gl_context.buffer_data_with_opt_array_buffer(
+                GL::ELEMENT_ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
+            );
 
-        buf
-    } else {
-        let err = JsValue::from_str("Error binding data to color buffer.");
-        return Err(err);
-    };
+            buf
+        } else {
+            let err = JsValue::from_str("Error binding data to index buffer.");
+            wasm_bindgen::throw_val(err);
+        };
 
-    let index_buffer = if let Some(buf) = gl_context.create_buffer() {
-        gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&buf));
+        // *======== Compile shaders =========*
+        let vertex_shader = if let Some(shader) = gl_context.create_shader(GL::VERTEX_SHADER) {
+            gl_context.shader_source(&shader, shaders::VS_GLSL);
+            gl_context.compile_shader(&shader);
 
-        let slice: &[u16] = &indices;
-        let array = Uint16Array::from(slice).buffer();
-        gl_context.buffer_data_with_opt_array_buffer(
-            GL::ELEMENT_ARRAY_BUFFER, Some(&array), GL::STATIC_DRAW
-        );
+            if let false = gl_context.get_shader_parameter(&shader, GL::COMPILE_STATUS).as_bool().unwrap() {
+                let log = gl_context.get_shader_info_log(&shader).unwrap();
+                let err = JsValue::from(format!("An error occurred compiling shader: {}", log));
+                gl_context.delete_shader(Some(&shader));
+                wasm_bindgen::throw_val(err);
+            }
 
-        buf
-    } else {
-        let err = JsValue::from_str("Error indices data to index buffer.");
-        return Err(err);
-    };
+            shader
+        } else {
+            let err = JsValue::from_str("Failed to create vertex shader.");
+            wasm_bindgen::throw_val(err);
+        };
 
-    // *======== Compile shaders =========*
-    let vertex_shader = if let Some(shader) = gl_context.create_shader(GL::VERTEX_SHADER) {
-        gl_context.shader_source(&shader, shaders::VS_GLSL);
-        gl_context.compile_shader(&shader);
+        let fragment_shader = if let Some(shader) = gl_context.create_shader(GL::FRAGMENT_SHADER) {
+            gl_context.shader_source(&shader, shaders::FS_GLSL);
+            gl_context.compile_shader(&shader);
 
-        if let false = gl_context.get_shader_parameter(&shader, GL::COMPILE_STATUS).as_bool().unwrap() {
-            let log = gl_context.get_shader_info_log(&shader).unwrap();
-            let err = JsValue::from(format!("An error occurred compiling shader: {}", log));
-            gl_context.delete_shader(Some(&shader));
-            return Err(err)
+            if let false = gl_context.get_shader_parameter(&shader, GL::COMPILE_STATUS).as_bool().unwrap() {
+                let log = gl_context.get_shader_info_log(&shader).unwrap();
+                let err = JsValue::from(format!("An error occurred compiling shader: {}", log));
+                gl_context.delete_shader(Some(&shader));
+                wasm_bindgen::throw_val(err);
+            }
+
+            shader
+        } else {
+            let err = JsValue::from_str("Failed to create vertex shader.");
+            wasm_bindgen::throw_val(err);
+        };
+
+        // *======== Initialize shader program ========*
+        let program = match gl_context.create_program() {
+            Some(p) => p,
+            None => {
+                let err = JsValue::from_str("Failed to initialize shader program");
+                wasm_bindgen::throw_val(err)
+            }
+        };
+
+        gl_context.attach_shader(&program, &vertex_shader);
+        gl_context.attach_shader(&program, &fragment_shader);
+        gl_context.link_program(&program);
+
+        if let false = gl_context.get_program_parameter(&program, GL::LINK_STATUS).as_bool().unwrap() {
+            let log = gl_context.get_program_info_log(&program).unwrap();
+            let err = JsValue::from_str(&format!("An error occurred compiling shader program: {}", log));
+            wasm_bindgen::throw_val(err);
         }
 
-        shader
-    } else {
-        let err = JsValue::from_str("Failed to create vertex shader.");
-        return Err(err);
-    };
+        // *======== Mapping attributes to shaders =========*
+        let mut uniform_locations = HashMap::new();
 
-    let fragment_shader = if let Some(shader) = gl_context.create_shader(GL::FRAGMENT_SHADER) {
-        gl_context.shader_source(&shader, shaders::FS_GLSL);
-        gl_context.compile_shader(&shader);
-
-        if let false = gl_context.get_shader_parameter(&shader, GL::COMPILE_STATUS).as_bool().unwrap() {
-            let log = gl_context.get_shader_info_log(&shader).unwrap();
-            let err = JsValue::from(format!("An error occurred compiling shader: {}", log));
-            gl_context.delete_shader(Some(&shader));
-            return Err(err)
+        if let Some(m) = gl_context.get_uniform_location(&program, "m") {
+            uniform_locations.insert("m".to_string(), m);
+        } else {
+            let err = JsValue::from_str("Failed to get uniform, m, location.");
+            wasm_bindgen::throw_val(err);
         }
 
-        shader
-    } else {
-        let err = JsValue::from_str("Failed to create vertex shader.");
-        return Err(err);
-    };
+        if let Some(v) = gl_context.get_uniform_location(&program, "v") {
+            uniform_locations.insert("v".to_string(), v);
+        } else {
+            let err = JsValue::from_str("Failed to get uniform, v, location.");
+            wasm_bindgen::throw_val(err);
+        }
 
-    let program = if let Some(p) = gl_context.create_program() {
-        p
-    } else {
-        let err = JsValue::from_str("Failed to initialize shader program");
-        return Err(err);
-    };
+        if let Some(p) = gl_context.get_uniform_location(&program, "p") {
+            uniform_locations.insert("p".to_string(), p);
+        } else {
+            let err = JsValue::from_str("Failed to get uniform, p, location.");
+            wasm_bindgen::throw_val(err);
+        }
 
-    gl_context.attach_shader(&program, &vertex_shader);
-    gl_context.attach_shader(&program, &fragment_shader);
-    gl_context.link_program(&program);
+        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&vertex_buffer));
+        let position = gl_context.get_attrib_location(&program, "position") as u32;
+        gl_context.vertex_attrib_pointer_with_i32(position, 3, GL::FLOAT, false, 0, 0);
+        gl_context.enable_vertex_attrib_array(position);
 
-    if let false = gl_context.get_program_parameter(&program, GL::LINK_STATUS).as_bool().unwrap() {
-        let log = gl_context.get_program_info_log(&program).unwrap();
-        let err = JsValue::from_str(&format!("An error occurred compiling shader program: {}", log));
-        return Err(err)
+        gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&color_buffer));
+        let color = gl_context.get_attrib_location(&program, "color") as u32;
+        gl_context.vertex_attrib_pointer_with_i32(color, 3, GL::FLOAT, false, 0, 0);
+        gl_context.enable_vertex_attrib_array(color);
+
+        // *======== Attach shader program to context ========*
+        gl_context.use_program(Some(&program));
+
+        Self { gl_context, program, uniform_locations, index_buffer }
     }
 
-    // *======== Mapping attributes to shaders =========*
-    let m_mat = if let Some(m) = gl_context.get_uniform_location(&program, "m") {
-        m
-    } else {
-        let err = JsValue::from_str("Failed to get uniform, m, location.");
-        return Err(err)
-    };
+    #[wasm_bindgen]
+    pub fn render(&self, canvas_width: Number, canvas_height: Number) {
+        let width = canvas_width.as_f64().unwrap();
+        let height = canvas_height.as_f64().unwrap();
 
-    let v_mat = if let Some(v) = gl_context.get_uniform_location(&program, "v") {
-        v
-    } else {
-        let err = JsValue::from_str("Failed to get uniform, v, location.");
-        return Err(err)
-    };
+        self.gl_context.enable(GL::DEPTH_TEST);
+        self.gl_context.depth_func(GL::LEQUAL);
+        self.gl_context.clear_color(0.0, 0.0, 0.0, 1.0);
+        self.gl_context.clear_depth(1.0);
+        self.gl_context.clear(GL::COLOR_BUFFER_BIT | GL::DEPTH_BUFFER_BIT);
 
-    let p_mat = if let Some(p) = gl_context.get_uniform_location(&program, "p") {
-        p
-    } else {
-        let err = JsValue::from_str("Failed to get uniform, p, location.");
-        return Err(err)
-    };
-    
-    gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&vertex_buffer));
-    let position = gl_context.get_attrib_location(&program, "position") as u32;
-    gl_context.vertex_attrib_pointer_with_i32(position, 3, GL::FLOAT, false, 0, 0);
-    gl_context.enable_vertex_attrib_array(position);
+        let m_loc = self.uniform_locations.get("m").unwrap();
+        let v_loc = self.uniform_locations.get("v").unwrap();
+        let p_loc = self.uniform_locations.get("p").unwrap();
 
-    gl_context.bind_buffer(GL::ARRAY_BUFFER, Some(&color_buffer));
-    let color = gl_context.get_attrib_location(&program, "color") as u32;
-    gl_context.vertex_attrib_pointer_with_i32(color, 3, GL::FLOAT, false, 0, 0);
-    gl_context.enable_vertex_attrib_array(color);
+        self.gl_context.uniform_matrix4fv_with_f32_array(Some(m_loc), false, &maths::model_matrix());
+        self.gl_context.uniform_matrix4fv_with_f32_array(Some(v_loc), false, &maths::view_matrix());
+        self.gl_context.uniform_matrix4fv_with_f32_array(Some(p_loc), false, &maths::projection_matrix(width, height));
 
-    gl_context.use_program(Some(&program));
+        self.gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&self.index_buffer));
+        self.gl_context.draw_elements_with_i32(GL::TRIANGLES, 36, GL::UNSIGNED_SHORT, 0);
+    }
 
-    // *======== Maths =========*
-    let model_matrix = (|| {
-        let identity = glm::TMat4::identity();
-        let rotate = glm::rotate(&identity, PI / 4.0, &glm::vec3(0.0, 1.0, 0.0));
-        let transl = glm::translate(&identity, &glm::vec3(0.0, 0.0, -5.0));
-        let mat = transl * rotate;
+    fn init_context(canvas_id: JsString) -> Result<GL, JsValue> {
+        let window = web_sys::window().unwrap();
+        let document = window.document().unwrap();
+        let element_id = String::from(canvas_id);
 
-        let model: [[f32; 4]; 4] = *mat.as_ref();
+        let element = match document.get_element_by_id(&element_id) {
+            Some(e) => e,
+            None => {
+                let err = JsValue::from_str(&format!(
+                    "No canvas found with id: {}", element_id
+                ));
+                return Err(err)
+            }
+        };
 
-        model.into_iter().flatten().collect::<Vec<f32>>()
-    })();
+        let canvas = element.dyn_into::<HtmlCanvasElement>()?;
+        let gl_context = canvas.get_context("webgl")?.unwrap().dyn_into::<GL>()?; 
 
-    let view_matrix = (|| {
-        let cam_position = glm::vec3(0.0, 0.0, 0.0);
-        let cam_target = glm::vec3(0.0, 0.0, -1.0);
-        let cam_up = glm::vec3(0.0, 1.0, 0.0);
-
-        let mat = glm::look_at(&cam_position, &cam_target, &cam_up);
-        let view: [[f32; 4]; 4] = *mat.as_ref();
-
-        view.into_iter().flatten().collect::<Vec<f32>>()
-    })();
-
-    let projection_matrix = (|| {
-        let aspect_ratio = canvas.width() as f32 / canvas.height() as f32;
-        let fov = PI / 4.0;
-        let near = 0.1;
-        let far = 100.0;
-        let mat = glm::perspective(aspect_ratio, fov, near, far);
-        let projection: [[f32; 4]; 4] = *mat.as_ref();
-
-        projection.into_iter().flatten().collect::<Vec<f32>>()
-    })();
-
-    // *======== Draw time =========*
-    gl_context.enable(GL::DEPTH_TEST);
-    gl_context.depth_func(GL::LEQUAL);
-    gl_context.clear_color(0.0, 0.0, 0.0, 1.0);
-    gl_context.clear_depth(1.0);
-    gl_context.clear(GL::COLOR_BUFFER_BIT | GL::DEPTH_BUFFER_BIT);
-
-    gl_context.uniform_matrix4fv_with_f32_array(Some(&m_mat), false, &model_matrix);
-    gl_context.uniform_matrix4fv_with_f32_array(Some(&v_mat), false, &view_matrix);
-    gl_context.uniform_matrix4fv_with_f32_array(Some(&p_mat), false, &projection_matrix);
-
-    gl_context.bind_buffer(GL::ELEMENT_ARRAY_BUFFER, Some(&index_buffer));
-    gl_context.draw_elements_with_i32(GL::TRIANGLES, 36, GL::UNSIGNED_SHORT, 0);
-
-    Ok(())
+        Ok(gl_context)
+    }
 }
