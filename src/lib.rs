@@ -174,7 +174,7 @@ impl HelloWebGL {
     }
 
     #[wasm_bindgen]
-    pub fn render(&self, canvas_width: Number, canvas_height: Number) {
+    pub fn render(&self, canvas_width: Number, canvas_height: Number, dtheta: Number) {
         let width = canvas_width.as_f64().unwrap();
         let height = canvas_height.as_f64().unwrap();
 
@@ -188,7 +188,7 @@ impl HelloWebGL {
         let v_loc = self.uniform_locations.get("v").unwrap();
         let p_loc = self.uniform_locations.get("p").unwrap();
 
-        self.gl_context.uniform_matrix4fv_with_f32_array(Some(m_loc), false, &maths::model_matrix());
+        self.gl_context.uniform_matrix4fv_with_f32_array(Some(m_loc), false, &maths::model_matrix(dtheta));
         self.gl_context.uniform_matrix4fv_with_f32_array(Some(v_loc), false, &maths::view_matrix());
         self.gl_context.uniform_matrix4fv_with_f32_array(Some(p_loc), false, &maths::projection_matrix(width, height));
 

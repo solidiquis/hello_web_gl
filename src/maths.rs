@@ -1,9 +1,11 @@
+use js_sys::Number;
 use nalgebra_glm as glm;
 use std::f32::consts::PI;
 
-pub fn model_matrix() -> Vec<f32> {
+pub fn model_matrix(dtheta: Number) -> Vec<f32> {
+    let theta = ((PI / 4.0) + (dtheta.as_f64().unwrap() as f32)) % (2.0 * PI);
     let identity = glm::TMat4::identity();
-    let rotate = glm::rotate(&identity, PI / 4.0, &glm::vec3(0.0, 1.0, 0.0));
+    let rotate = glm::rotate(&identity, theta, &glm::vec3(0.0, 1.0, 1.0));
     let transl = glm::translate(&identity, &glm::vec3(0.0, 0.0, -5.0));
     let mat = transl * rotate;
 
